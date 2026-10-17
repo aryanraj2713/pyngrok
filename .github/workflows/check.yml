@@ -1,0 +1,27 @@
+name: checks
+on: [push, pull_request]
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --python 3.11
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run ty check src
+      - run: uv run pytest
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --manifest-path crates/pyngrok-core/Cargo.toml --check
+      - run: cargo clippy --manifest-path crates/pyngrok-core/Cargo.toml --all-targets -- -D warnings
+      - run: cargo test --manifest-path crates/pyngrok-core/Cargo.toml
+      - uses: astral-sh/setup-uv@v6
+      - run: cargo build --manifest-path crates/pyngrok-core/Cargo.toml
+      - run: uv sync --python 3.11
+      - run: uv run pytest tests/test_tunnel_integration.py -q

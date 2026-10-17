@@ -1,0 +1,25 @@
+{
+  "observed_at": "2026-10-18",
+  "open": false,
+  "providers": [
+    {
+      "id": "ghidra",
+      "name": "Ghidra",
+      "status": "unavailable",
+      "code": "not_configured"
+    },
+    {
+      "id": "hopper",
+      "name": "Hopper Disassembler",
+      "status": "unavailable",
+      "code": "executable_missing"
+    },
+    {
+      "id": "ida",
+      "name": "IDA MCP adapter",
+      "status": "unavailable",
+      "code": "not_configured"
+    }
+  ],
+  "note": "Machine-local paths and configuration details omitted from the public snapshot."
+}

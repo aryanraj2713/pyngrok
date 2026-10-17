@@ -1,0 +1,12 @@
+.venv/
+.cache/
+.research/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+target/
+dist/
+build/
+*.egg-info/
+.env
+*.pem
