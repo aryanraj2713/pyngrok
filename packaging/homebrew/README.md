@@ -3,7 +3,7 @@
 The source-only `--HEAD` installation builds Rust on each user's Mac. Homebrew
 then installs Rust, LLVM, uv, Python and their dependencies. Those are build tools
 and interpreter dependencies, not the size of the tunnel engine. The optimized
-Rust binary measured about 4 MiB on macOS arm64; the complete standalone package
+Rust binary measured about 2.5 MiB on macOS arm64; the complete standalone package
 includes the Python interpreter and CLI libraries and is larger.
 
 ## Prebuilt distribution

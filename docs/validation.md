@@ -5,7 +5,7 @@ Local environment: macOS arm64, Python 3.12.11, 2026-10-18.
 - Python unit and packaging tests: 31 passed.
 - Ruff lint/format and ty checking of `src`: passed.
 - Rust: eight unit tests passed, rustfmt passed, Clippy passed with warnings denied.
-- Rust release binary: compiled offline with the committed Cargo.lock; approximately 4 MiB before the additional thin-LTO release profile.
+- Rust release binary: compiled offline with the committed Cargo.lock; approximately 2.5 MiB with thin LTO, one codegen unit and stripped symbols. This is the engine only, not the full standalone package.
 - Native TCP/TLS integration: three tests attempted and blocked by sandbox socket permissions (`Operation not permitted`); not counted as passed.
 - Standalone packaging: build scripts, metadata validation, bundled-engine discovery and generated formula tested locally. PyInstaller is unavailable locally, so complete macOS packages await CI builds.
 - Python wheel: built successfully with setuptools; includes console entrypoint and `py.typed`.
