@@ -1,50 +1,63 @@
-# Homebrew distribution
+# Lightweight Homebrew distribution
 
-`Formula/pyngrok.rb` installs both commands: `pyngrok` (an isolated Python CLI)
-and `pyngrok-core` (a release-mode Rust binary). The launcher selects its bundled
-engine explicitly, so another installation on PATH cannot silently replace it.
-Rust and uv are build-only dependencies; Homebrew supplies the Python runtime.
+The source-only `--HEAD` installation builds Rust on each user's Mac. Homebrew
+then installs Rust, LLVM, uv, Python and their dependencies. Those are build tools
+and interpreter dependencies, not the size of the tunnel engine. The optimized
+Rust binary measured about 4 MiB on macOS arm64; the complete standalone package
+includes the Python interpreter and CLI libraries and is larger.
 
-## Development installation
+## Prebuilt distribution
 
-These commands become usable **after** the public repository exists and contains
-this code. It has not been published or installed through Homebrew yet:
+`.github/workflows/release.yml` builds standalone packages on macOS arm64 and
+Intel runners. PyInstaller bundles Python and the CLI as an ordinary directory;
+the compiled Rust engine sits beside the launcher. There is no per-command
+self-extraction. End users do not need Rust, LLVM, uv or Homebrew Python.
+
+After tests on both architectures pass, the workflow publishes a prerelease,
+records each archive's SHA-256 and actual compressed/installed size, and commits
+the generated binary formula to `Formula/pyngrok.rb`. Until that first release
+succeeds, the existing default formula is still the source-build version.
+
+**Use these commands only after the standalone release/formula update succeeds:**
 
 ```sh
 brew tap aryanraj2713/pyngrok https://github.com/aryanraj2713/pyngrok.git
-brew install --HEAD aryanraj2713/pyngrok/pyngrok
-brew test aryanraj2713/pyngrok/pyngrok
+brew update
+brew install aryanraj2713/pyngrok/pyngrok
 pyngrok preview
 ```
 
-An explicit tap URL allows the source repository to double as a tap without a
-separate `homebrew-pyngrok` repository. This is a development HEAD formula, not a
-Homebrew/core submission or a stable release.
+The prebuilt formula supports macOS 14+ and has no Homebrew package dependencies.
+It copies a complete runtime and symlinks the two commands. The release archive
+and formula checksums come from the same tested build; no placeholder URLs or
+checksums are committed. The packages are ad-hoc signed, not Developer ID signed
+or notarized. Their full download size and cold startup time remain unmeasured
+until the first standalone build completes.
 
-Homebrew's network-enabled `fetch` phase resolves the Python requirements into a
-hash-checked requirements file and downloads their wheels. Cargo resolves a
-lockfile when the source does not contain one, then fetches locked dependencies.
-The subsequent installation builds Rust offline, installs the Python CLI into a
-private virtual environment offline, and installs a launcher with the engine path.
-Resolution is reproducible within that installation; until release lockfiles are
-committed, separate HEAD builds can resolve different dependency versions.
+## Source builds for developers
 
-## Validation and stable release
+`Formula/pyngrok-source.rb` retains the original build process:
 
-Local validation covers Ruby syntax. Homebrew refused to load a standalone formula
-outside a tap, and tap initialization is blocked by this session's filesystem permissions.
-A full `brew install`, native build, `brew test`, and audit still need to run on a
-network-enabled machine with write access to Homebrew directories. Normal
-Homebrew installation will install its missing Rust build dependency.
+```sh
+brew install --HEAD aryanraj2713/pyngrok/pyngrok-source
+```
 
-Before a stable release:
+Both formulae export the same command names; use one installation at a time.
+The source formula resolves/fetches dependencies during Homebrew's network-enabled
+`fetch` phase and installs offline. The Rust lockfile is now committed.
 
-1. Compile and test the native engine and run `cargo fmt`/Clippy.
-2. Commit Cargo and Python dependency locks and pin Python formula resources.
-3. Tag a tested release; replace HEAD-only distribution with its source archive
-   URL and actual SHA-256. Retain the HEAD stanza for development if desired.
-4. Install/test the formula on macOS arm64 and x86_64, then build bottles to avoid
-   compiling Rust on each user's computer.
+## Release and verification
 
-Reference: [Homebrew Formula Cookbook](https://docs.brew.sh/Formula-Cookbook),
-including its `fetch` phase and offline installation contract.
+Packaging changes pushed to main trigger the standalone workflow; it can also be
+started with `gh workflow run release.yml --repo aryanraj2713/pyngrok`. It checks
+Python and Rust, tests real native TCP/TLS forwarding, and smoke-tests the frozen
+launcher with no Python or Rust on PATH. Release publication requires both matrix
+builds; failed checks leave the current Homebrew formula unchanged.
+
+The final workflow step pushes the formula update without force; a concurrent
+main update may require rerunning the release. Existing prerelease assets are
+never overwritten. Source builds are for development; ordinary users should use
+the default prebuilt formula without `--HEAD` once available.
+
+References: [Homebrew binary packages](https://docs.brew.sh/Bottles),
+[PyInstaller bundles](https://pyinstaller.org/en/stable/operating-mode.html).

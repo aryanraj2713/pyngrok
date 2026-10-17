@@ -25,6 +25,11 @@ def find_engine() -> Path:
         if candidate.is_file() and os.access(candidate, os.X_OK):
             return candidate.resolve()
         raise ValueError("PYNGROK_CORE must point to an executable pyngrok-core binary")
+    if getattr(sys, "frozen", False):
+        bundled = Path(sys.executable).resolve().parent / "pyngrok-core"
+        if bundled.is_file() and os.access(bundled, os.X_OK):
+            return bundled
+        raise ValueError("Bundled Rust engine is missing; reinstall pyngrok")
     installed = shutil.which("pyngrok-core")
     if installed:
         return Path(installed)

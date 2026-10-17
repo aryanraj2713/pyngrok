@@ -1,0 +1,98 @@
+name: standalone release
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/release.yml
+      - packaging/standalone/**
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: standalone-release
+  cancel-in-progress: false
+jobs:
+  build:
+    permissions:
+      contents: read
+      statuses: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            architecture: arm64
+          - runner: macos-15-intel
+            architecture: x86_64
+    runs-on: ${{ matrix.runner }}
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+    steps:
+      - name: Report release build URL
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh api "repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}"
+          -f state=pending -f context=standalone/macos-${{ matrix.architecture }}
+          -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --python 3.12 --group packaging
+      - run: uv run ruff check src tests packaging/standalone
+      - run: uv run ty check src
+      - run: cargo fmt --manifest-path crates/pyngrok-core/Cargo.toml --check
+      - run: cargo clippy --locked --manifest-path crates/pyngrok-core/Cargo.toml --all-targets -- -D warnings
+      - run: cargo test --locked --manifest-path crates/pyngrok-core/Cargo.toml
+      - run: uv run --group packaging python packaging/standalone/build.py
+      - name: Test real packaged transport
+        env:
+          PYNGROK_CORE: ${{ github.workspace }}/dist/standalone/pyngrok/pyngrok-core
+        run: uv run pytest -q
+      - name: Verify launcher without Python on PATH
+        run: |
+          env -u PYNGROK_CORE PATH=/usr/bin:/bin dist/standalone/pyngrok/pyngrok version
+          env -u PYNGROK_CORE PATH=/usr/bin:/bin dist/standalone/pyngrok/pyngrok doctor
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.architecture }}
+          path: |
+            dist/pyngrok-*.tar.gz
+            dist/pyngrok-*.tar.json
+          if-no-files-found: error
+      - name: Report build result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_STATUS: ${{ job.status }}
+        run: |
+          state=failure
+          if [ "$BUILD_STATUS" = success ]; then state=success; fi
+          gh api "repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" -f state="$state" -f context=standalone/macos-${{ matrix.architecture }} -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: macos-*
+          merge-multiple: true
+          path: release-assets
+      - name: Generate formula and publish tested prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+          release_tag="v${version}-preview.${GITHUB_RUN_NUMBER}"
+          python3 packaging/standalone/formula.py --assets release-assets --tag "$release_tag" --output Formula/pyngrok.rb
+          gh release create "$release_tag" release-assets/*.tar.gz release-assets/*.tar.json --target "$GITHUB_SHA" --prerelease --title "pyngrok ${release_tag}" --notes "Self-contained macOS builds. Python and Rust engine included; no compiler or Homebrew Python required. Checks and raw TCP/TLS integration tests passed on both architectures."
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add Formula/pyngrok.rb
+          git commit -m "Use standalone release ${release_tag} for Homebrew"
+          git push origin HEAD:main

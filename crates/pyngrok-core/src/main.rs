@@ -4,7 +4,10 @@ use std::{
     io::{BufReader, Write},
     net::{IpAddr, SocketAddr},
     path::PathBuf,
-    sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     time::Duration,
 };
 
@@ -46,7 +49,9 @@ impl<T> Drop for AbortOnDrop<T> {
 }
 
 fn pending_lock(pending: &PendingMap) -> std::sync::MutexGuard<'_, HashMap<String, Pending>> {
-    pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    pending
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// Synchronous cleanup also runs when the relay cancels a session future.
@@ -119,14 +124,38 @@ struct ConnectArgs {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum Message {
-    Register { version: u8, token: String, public_port: u16 },
-    Data { version: u8, token: String, ticket: String },
-    Ready { version: u8, session_id: String, public_address: String },
-    Incoming { version: u8, ticket: String },
-    DataReady { version: u8 },
-    Ping { version: u8 },
-    Pong { version: u8 },
-    Error { version: u8, message: String },
+    Register {
+        version: u8,
+        token: String,
+        public_port: u16,
+    },
+    Data {
+        version: u8,
+        token: String,
+        ticket: String,
+    },
+    Ready {
+        version: u8,
+        session_id: String,
+        public_address: String,
+    },
+    Incoming {
+        version: u8,
+        ticket: String,
+    },
+    DataReady {
+        version: u8,
+    },
+    Ping {
+        version: u8,
+    },
+    Pong {
+        version: u8,
+    },
+    Error {
+        version: u8,
+        message: String,
+    },
 }
 
 struct Pending {
@@ -176,7 +205,10 @@ fn authenticate(expected: &[u8; 32], candidate: &str) -> bool {
 async fn read_frame<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Message> {
     let mut frame = Vec::with_capacity(256);
     loop {
-        let byte = reader.read_u8().await.context("control connection closed")?;
+        let byte = reader
+            .read_u8()
+            .await
+            .context("control connection closed")?;
         if byte == b'\n' {
             return serde_json::from_slice(&frame).context("invalid protocol frame");
         }
@@ -187,53 +219,78 @@ async fn read_frame<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Mes
     }
 }
 
-async fn write_frame<W: AsyncWrite + Unpin + ?Sized>(writer: &mut W, message: &Message) -> Result<()> {
+async fn write_frame<W: AsyncWrite + Unpin + ?Sized>(
+    writer: &mut W,
+    message: &Message,
+) -> Result<()> {
     let mut frame = serde_json::to_vec(message)?;
     if frame.len() > FRAME_LIMIT {
         bail!("outgoing protocol frame too large");
     }
     frame.push(b'\n');
     timeout(HANDSHAKE_TIMEOUT, writer.write_all(&frame))
-        .await.context("control write timed out")??;
+        .await
+        .context("control write timed out")??;
     Ok(())
 }
 
 fn tls_acceptor(cert: &PathBuf, key: &PathBuf) -> Result<TlsAcceptor> {
-    let mut cert_reader = BufReader::new(std::fs::File::open(cert).context("open TLS certificate")?);
+    let mut cert_reader =
+        BufReader::new(std::fs::File::open(cert).context("open TLS certificate")?);
     let certs = rustls_pemfile::certs(&mut cert_reader).collect::<std::io::Result<Vec<_>>>()?;
     let mut key_reader = BufReader::new(std::fs::File::open(key).context("open TLS private key")?);
     let key = rustls_pemfile::private_key(&mut key_reader)?.context("no private key in PEM")?;
-    let config = ServerConfig::builder().with_no_client_auth().with_single_cert(certs, key)?;
+    let config = ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certs, key)?;
     Ok(TlsAcceptor::from(Arc::new(config)))
 }
 
 impl Dialer {
     async fn new(args: &ConnectArgs) -> Result<Self> {
         let addresses: Vec<_> = timeout(HANDSHAKE_TIMEOUT, lookup_host(&args.relay))
-            .await.context("relay DNS lookup timed out")??.collect();
+            .await
+            .context("relay DNS lookup timed out")??
+            .collect();
         if addresses.is_empty() {
             bail!("relay hostname resolved to no addresses");
         }
-        if args.tls_server_name.is_none() && !args.allow_insecure
+        if args.tls_server_name.is_none()
+            && !args.allow_insecure
             && addresses.iter().any(|a| !a.ip().is_loopback())
         {
-            bail!("non-loopback relay requires TLS (--tls-server-name) or explicit --allow-insecure");
+            bail!(
+                "non-loopback relay requires TLS (--tls-server-name) or explicit --allow-insecure"
+            );
         }
         let tls = if let Some(name) = &args.tls_server_name {
             let mut roots = RootCertStore::empty();
             if let Some(path) = &args.ca_cert {
-                let mut reader = BufReader::new(std::fs::File::open(path).context("open CA certificate")?);
+                let mut reader =
+                    BufReader::new(std::fs::File::open(path).context("open CA certificate")?);
                 for certificate in rustls_pemfile::certs(&mut reader) {
                     roots.add(certificate?)?;
                 }
-                if roots.is_empty() { bail!("CA file contains no certificates"); }
+                if roots.is_empty() {
+                    bail!("CA file contains no certificates");
+                }
             } else {
                 roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
             }
-            let config = ClientConfig::builder().with_root_certificates(roots).with_no_client_auth();
-            Some((TlsConnector::from(Arc::new(config)), ServerName::try_from(name.clone())?))
-        } else { None };
-        Ok(Self { addresses: Arc::new(addresses), tls })
+            let config = ClientConfig::builder()
+                .with_root_certificates(roots)
+                .with_no_client_auth();
+            Some((
+                TlsConnector::from(Arc::new(config)),
+                ServerName::try_from(name.clone())?,
+            ))
+        } else {
+            None
+        };
+        Ok(Self {
+            addresses: Arc::new(addresses),
+            tls,
+        })
     }
 
     async fn connect(&self) -> Result<Stream> {
@@ -245,31 +302,50 @@ impl Dialer {
                 None => Box::new(socket),
             };
             Ok(stream)
-        }).await.context("relay connection timed out")?
+        })
+        .await
+        .context("relay connection timed out")?
     }
 }
 
 async fn handle_relay_connection(mut stream: Stream, state: Arc<RelayState>) -> Result<()> {
     let message = timeout(HANDSHAKE_TIMEOUT, read_frame(&mut *stream))
-        .await.context("authentication timed out")??;
+        .await
+        .context("authentication timed out")??;
     match message {
-        Message::Register { version: VERSION, token, public_port } if authenticate(&state.token_hash, &token) => {
+        Message::Register {
+            version: VERSION,
+            token,
+            public_port,
+        } if authenticate(&state.token_hash, &token) => {
             relay_session(stream, state, public_port).await
         }
-        Message::Data { version: VERSION, token, ticket } if authenticate(&state.token_hash, &token) => {
+        Message::Data {
+            version: VERSION,
+            token,
+            ticket,
+        } if authenticate(&state.token_hash, &token) => {
             let pending = pending_lock(&state.pending).remove(&ticket);
             if let Some(pending) = pending {
                 write_frame(&mut *stream, &Message::DataReady { version: VERSION }).await?;
-                pending.sender.send(stream).map_err(|_| anyhow!("ticket expired"))?;
+                pending
+                    .sender
+                    .send(stream)
+                    .map_err(|_| anyhow!("ticket expired"))?;
                 Ok(())
             } else {
                 bail!("invalid or expired data ticket");
             }
         }
         _ => {
-            let _ = write_frame(&mut *stream, &Message::Error {
-                version: VERSION, message: "authentication or protocol version rejected".into(),
-            }).await;
+            let _ = write_frame(
+                &mut *stream,
+                &Message::Error {
+                    version: VERSION,
+                    message: "authentication or protocol version rejected".into(),
+                },
+            )
+            .await;
             bail!("authentication or protocol version rejected");
         }
     }
@@ -279,25 +355,38 @@ async fn relay_session(mut control: Stream, state: Arc<RelayState>, port: u16) -
     let listener = match TcpListener::bind(SocketAddr::new(state.public_bind, port)).await {
         Ok(listener) => listener,
         Err(_) => {
-            write_frame(&mut *control, &Message::Error {
-                version: VERSION, message: "public listen port unavailable".into(),
-            }).await?;
+            write_frame(
+                &mut *control,
+                &Message::Error {
+                    version: VERSION,
+                    message: "public listen port unavailable".into(),
+                },
+            )
+            .await?;
             bail!("public listen port unavailable");
         }
     };
     let session = random_id();
     let active = Arc::new(AtomicBool::new(true));
     let _session_guard = SessionGuard {
-        pending: state.pending.clone(), session: session.clone(), active: active.clone(),
+        pending: state.pending.clone(),
+        session: session.clone(),
+        active: active.clone(),
     };
     let host = if state.public_host.contains(':') && !state.public_host.starts_with('[') {
         format!("[{}]", state.public_host)
-    } else { state.public_host.clone() };
-    write_frame(&mut *control, &Message::Ready {
-        version: VERSION,
-        session_id: session.clone(),
-        public_address: format!("{host}:{}", listener.local_addr()?.port()),
-    }).await?;
+    } else {
+        state.public_host.clone()
+    };
+    write_frame(
+        &mut *control,
+        &Message::Ready {
+            version: VERSION,
+            session_id: session.clone(),
+            public_address: format!("{host}:{}", listener.local_addr()?.port()),
+        },
+    )
+    .await?;
     let (mut reader, mut writer) = tokio::io::split(control);
     let (sender, mut receiver) = mpsc::channel::<Message>(128);
     let mut tasks = JoinSet::new();
@@ -308,7 +397,9 @@ async fn relay_session(mut control: Stream, state: Arc<RelayState>, port: u16) -
             let frame = timeout(IDLE_TIMEOUT, read_frame(&mut reader)).await??;
             match frame {
                 Message::Ping { version: VERSION } => {
-                    sender.send(Message::Pong { version: VERSION }).await
+                    sender
+                        .send(Message::Pong { version: VERSION })
+                        .await
                         .map_err(|_| anyhow!("control writer stopped"))?;
                 }
                 _ => bail!("unexpected control message"),
@@ -378,13 +469,19 @@ async fn relay(args: RelayArgs, token: String) -> Result<()> {
     if tls.is_none() && !args.allow_insecure && !args.bind.ip().is_loopback() {
         bail!("non-loopback relay bind requires TLS or explicit --allow-insecure");
     }
-    let listener = TcpListener::bind(args.bind).await.context("bind relay listener")?;
-    emit(json!({"event": "relay_ready", "bind": listener.local_addr()?.to_string(),
-        "public_bind": args.public_bind.to_string(), "tls": tls.is_some()}));
+    let listener = TcpListener::bind(args.bind)
+        .await
+        .context("bind relay listener")?;
+    emit(
+        json!({"event": "relay_ready", "bind": listener.local_addr()?.to_string(),
+        "public_bind": args.public_bind.to_string(), "tls": tls.is_some()}),
+    );
     let state = Arc::new(RelayState {
-        token_hash: token_hash(&token), pending: Arc::new(Mutex::new(HashMap::new())),
+        token_hash: token_hash(&token),
+        pending: Arc::new(Mutex::new(HashMap::new())),
         connections: Arc::new(Semaphore::new(args.max_connections.into())),
-        public_bind: args.public_bind, public_host: args.public_host,
+        public_bind: args.public_bind,
+        public_host: args.public_host,
     });
     // Handshake/control sockets have their own budget so public sockets cannot
     // consume all capacity required by the matching data connections.
@@ -425,14 +522,29 @@ async fn relay(args: RelayArgs, token: String) -> Result<()> {
     Ok(())
 }
 
-async fn forward_connection(dialer: Dialer, token: Arc<String>, ticket: String, upstream: String) -> Result<()> {
+async fn forward_connection(
+    dialer: Dialer,
+    token: Arc<String>,
+    ticket: String,
+    upstream: String,
+) -> Result<()> {
     let mut local = timeout(HANDSHAKE_TIMEOUT, TcpStream::connect(&upstream))
-        .await.context("upstream connection timed out")?.context("connect upstream")?;
+        .await
+        .context("upstream connection timed out")?
+        .context("connect upstream")?;
     local.set_nodelay(true)?;
     let mut data = dialer.connect().await?;
-    write_frame(&mut *data, &Message::Data { version: VERSION, token: (*token).clone(), ticket }).await?;
+    write_frame(
+        &mut *data,
+        &Message::Data {
+            version: VERSION,
+            token: (*token).clone(),
+            ticket,
+        },
+    )
+    .await?;
     match timeout(HANDSHAKE_TIMEOUT, read_frame(&mut *data)).await?? {
-        Message::DataReady { version: VERSION } => {},
+        Message::DataReady { version: VERSION } => {}
         _ => bail!("relay rejected data connection"),
     }
     let connection_id = random_id();
@@ -440,15 +552,19 @@ async fn forward_connection(dialer: Dialer, token: Arc<String>, ticket: String, 
     let result = tokio::io::copy_bidirectional(&mut local, &mut data).await;
     match result {
         Ok((bytes_up, bytes_down)) => {
-            emit(json!({"event": "connection_close", "connection_id": connection_id,
-                "bytes_up": bytes_up, "bytes_down": bytes_down}));
+            emit(
+                json!({"event": "connection_close", "connection_id": connection_id,
+                "bytes_up": bytes_up, "bytes_down": bytes_down}),
+            );
             Ok(())
         }
         Err(error) => {
             // copy_bidirectional does not return partial counters on failure.
-            emit(json!({"event": "connection_close", "connection_id": connection_id,
+            emit(
+                json!({"event": "connection_close", "connection_id": connection_id,
                 "bytes_up": 0, "bytes_down": 0, "counters_complete": false,
-                "message": error.to_string()}));
+                "message": error.to_string()}),
+            );
             Err(error.into())
         }
     }
@@ -457,11 +573,21 @@ async fn forward_connection(dialer: Dialer, token: Arc<String>, ticket: String, 
 async fn connect(args: ConnectArgs, token: String) -> Result<()> {
     let dialer = Dialer::new(&args).await?;
     let mut control = dialer.connect().await?;
-    write_frame(&mut *control, &Message::Register {
-        version: VERSION, token: token.clone(), public_port: args.public_port,
-    }).await?;
+    write_frame(
+        &mut *control,
+        &Message::Register {
+            version: VERSION,
+            token: token.clone(),
+            public_port: args.public_port,
+        },
+    )
+    .await?;
     match timeout(HANDSHAKE_TIMEOUT, read_frame(&mut *control)).await?? {
-        Message::Ready { version: VERSION, session_id, public_address } => {
+        Message::Ready {
+            version: VERSION,
+            session_id,
+            public_address,
+        } => {
             emit(json!({"event": "tunnel_ready", "session_id": session_id,
                 "public_address": public_address, "upstream": args.upstream}));
         }
@@ -473,7 +599,10 @@ async fn connect(args: ConnectArgs, token: String) -> Result<()> {
     let mut read_task = AbortOnDrop(tokio::spawn(async move {
         loop {
             let frame = timeout(IDLE_TIMEOUT, read_frame(&mut reader)).await??;
-            sender.send(frame).await.map_err(|_| anyhow!("agent stopped"))?;
+            sender
+                .send(frame)
+                .await
+                .map_err(|_| anyhow!("agent stopped"))?;
         }
         #[allow(unreachable_code)]
         Ok::<(), anyhow::Error>(())
@@ -529,7 +658,8 @@ async fn connect(args: ConnectArgs, token: String) -> Result<()> {
 async fn main() -> std::process::ExitCode {
     let cli = Cli::parse();
     let result = async {
-        let token = std::env::var("PYNGROK_TOKEN").context("set PYNGROK_TOKEN (at least 16 bytes)")?;
+        let token =
+            std::env::var("PYNGROK_TOKEN").context("set PYNGROK_TOKEN (at least 16 bytes)")?;
         if token.len() < 16 || token.len() > 1024 {
             bail!("PYNGROK_TOKEN must contain 16 to 1024 bytes");
         }
@@ -537,7 +667,8 @@ async fn main() -> std::process::ExitCode {
             Command::Relay(args) => relay(args, token).await,
             Command::Connect(args) => connect(args, token).await,
         }
-    }.await;
+    }
+    .await;
     match result {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(error) => {
@@ -571,20 +702,30 @@ mod tests {
     #[tokio::test]
     async fn framing_preserves_application_bytes_after_newline() {
         let mut bytes = &b"{\"type\":\"data_ready\",\"version\":1}\nGET / HTTP/1.1\r\n"[..];
-        assert!(matches!(read_frame(&mut bytes).await.unwrap(), Message::DataReady { version: VERSION }));
+        assert!(matches!(
+            read_frame(&mut bytes).await.unwrap(),
+            Message::DataReady { version: VERSION }
+        ));
         assert_eq!(bytes, b"GET / HTTP/1.1\r\n");
     }
 
     #[tokio::test]
     async fn rejects_oversized_and_truncated_frames() {
         let input = vec![b'x'; FRAME_LIMIT + 1];
-        assert!(read_frame(&mut input.as_slice()).await.unwrap_err().to_string().contains("exceeds"));
+        assert!(read_frame(&mut input.as_slice())
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("exceeds"));
         assert!(read_frame(&mut &b"{\"type\":"[..]).await.is_err());
     }
 
     #[tokio::test]
     async fn rejects_unknown_fields_and_bad_json() {
-        for input in [b"{\"type\":\"ping\",\"version\":1,\"extra\":true}\n".as_slice(), b"invalid\n"] {
+        for input in [
+            b"{\"type\":\"ping\",\"version\":1,\"extra\":true}\n".as_slice(),
+            b"invalid\n",
+        ] {
             assert!(read_frame(&mut &input[..]).await.is_err());
         }
     }
@@ -592,7 +733,15 @@ mod tests {
     #[tokio::test]
     async fn frames_round_trip() {
         let mut frame = Vec::new();
-        write_frame(&mut frame, &Message::Incoming { version: VERSION, ticket: "abc".into() }).await.unwrap();
+        write_frame(
+            &mut frame,
+            &Message::Incoming {
+                version: VERSION,
+                ticket: "abc".into(),
+            },
+        )
+        .await
+        .unwrap();
         assert!(matches!(read_frame(&mut frame.as_slice()).await.unwrap(),
             Message::Incoming { version: VERSION, ticket } if ticket == "abc"));
     }
@@ -603,29 +752,65 @@ mod tests {
         let (deliver, mut receive) = oneshot::channel();
         let pending = Arc::new(Mutex::new(HashMap::from([(
             "test-ticket".to_owned(),
-            Pending { session: "test-session".to_owned(), sender: deliver },
+            Pending {
+                session: "test-session".to_owned(),
+                sender: deliver,
+            },
         )])));
         let state = Arc::new(RelayState {
-            token_hash: token_hash(token), pending: pending.clone(),
+            token_hash: token_hash(token),
+            pending: pending.clone(),
             connections: Arc::new(Semaphore::new(1)),
-            public_bind: "127.0.0.1".parse().unwrap(), public_host: "127.0.0.1".to_owned(),
+            public_bind: "127.0.0.1".parse().unwrap(),
+            public_host: "127.0.0.1".to_owned(),
         });
 
         let (mut client, server) = tokio::io::duplex(4096);
-        write_frame(&mut client, &Message::Data {
-            version: VERSION, token: "wrong token".into(), ticket: "test-ticket".into(),
-        }).await.unwrap();
-        assert!(handle_relay_connection(Box::new(server), state.clone()).await.is_err());
-        assert!(matches!(read_frame(&mut client).await.unwrap(), Message::Error { .. }));
-        assert_eq!(pending_lock(&pending).len(), 1, "unauthenticated client must not consume ticket");
-        assert!(matches!(receive.try_recv(), Err(oneshot::error::TryRecvError::Empty)));
+        write_frame(
+            &mut client,
+            &Message::Data {
+                version: VERSION,
+                token: "wrong token".into(),
+                ticket: "test-ticket".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(handle_relay_connection(Box::new(server), state.clone())
+            .await
+            .is_err());
+        assert!(matches!(
+            read_frame(&mut client).await.unwrap(),
+            Message::Error { .. }
+        ));
+        assert_eq!(
+            pending_lock(&pending).len(),
+            1,
+            "unauthenticated client must not consume ticket"
+        );
+        assert!(matches!(
+            receive.try_recv(),
+            Err(oneshot::error::TryRecvError::Empty)
+        ));
 
         let (mut client, server) = tokio::io::duplex(4096);
-        write_frame(&mut client, &Message::Data {
-            version: VERSION, token: token.into(), ticket: "test-ticket".into(),
-        }).await.unwrap();
-        handle_relay_connection(Box::new(server), state.clone()).await.unwrap();
-        assert!(matches!(read_frame(&mut client).await.unwrap(), Message::DataReady { .. }));
+        write_frame(
+            &mut client,
+            &Message::Data {
+                version: VERSION,
+                token: token.into(),
+                ticket: "test-ticket".into(),
+            },
+        )
+        .await
+        .unwrap();
+        handle_relay_connection(Box::new(server), state.clone())
+            .await
+            .unwrap();
+        assert!(matches!(
+            read_frame(&mut client).await.unwrap(),
+            Message::DataReady { .. }
+        ));
         let mut delivered = receive.await.unwrap();
         client.write_all(b"raw application bytes").await.unwrap();
         let mut buffer = [0_u8; 21];
@@ -634,10 +819,19 @@ mod tests {
         assert!(pending_lock(&pending).is_empty());
 
         let (mut client, server) = tokio::io::duplex(4096);
-        write_frame(&mut client, &Message::Data {
-            version: VERSION, token: token.into(), ticket: "test-ticket".into(),
-        }).await.unwrap();
-        assert!(handle_relay_connection(Box::new(server), state).await.is_err());
+        write_frame(
+            &mut client,
+            &Message::Data {
+                version: VERSION,
+                token: token.into(),
+                ticket: "test-ticket".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(handle_relay_connection(Box::new(server), state)
+            .await
+            .is_err());
     }
 
     #[tokio::test]
@@ -645,12 +839,26 @@ mod tests {
         let (owned_sender, owned_receiver) = oneshot::channel::<Stream>();
         let (other_sender, _other_receiver) = oneshot::channel::<Stream>();
         let pending = Arc::new(Mutex::new(HashMap::from([
-            ("owned".into(), Pending { session: "cancelled".into(), sender: owned_sender }),
-            ("other".into(), Pending { session: "surviving".into(), sender: other_sender }),
+            (
+                "owned".into(),
+                Pending {
+                    session: "cancelled".into(),
+                    sender: owned_sender,
+                },
+            ),
+            (
+                "other".into(),
+                Pending {
+                    session: "surviving".into(),
+                    sender: other_sender,
+                },
+            ),
         ])));
         let active = Arc::new(AtomicBool::new(true));
         let guard = SessionGuard {
-            pending: pending.clone(), session: "cancelled".into(), active: active.clone(),
+            pending: pending.clone(),
+            session: "cancelled".into(),
+            active: active.clone(),
         };
         let (started_sender, started_receiver) = oneshot::channel();
         let task = tokio::spawn(async move {
@@ -662,7 +870,10 @@ mod tests {
         task.abort();
         assert!(task.await.unwrap_err().is_cancelled());
         assert!(!active.load(Ordering::Acquire));
-        assert!(owned_receiver.await.is_err(), "cancelled session must close its waiting public socket");
+        assert!(
+            owned_receiver.await.is_err(),
+            "cancelled session must close its waiting public socket"
+        );
         let remaining = pending_lock(&pending);
         assert_eq!(remaining.len(), 1);
         assert!(remaining.contains_key("other"));

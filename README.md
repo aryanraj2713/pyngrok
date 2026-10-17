@@ -2,14 +2,16 @@
 
 A typed Python CLI with a Rust / Tokio reverse-tunnel engine and a neofetch-inspired terminal dashboard.
 
-**Development status:** Python checks run locally. The Rust engine has not been compiled or exercised in this environment because a Rust toolchain is absent and shell network access is unavailable. This is an initial implementation, not a verified production tunnel or a complete reconstruction of ngrok. See [the investigation](docs/research/ngrok.md).
+**Development status:** Python checks, Rust compilation, eight Rust unit tests, rustfmt and Clippy pass locally. Native network integration is blocked by this sandbox's socket permissions and must pass in CI before a standalone release is published. This is an initial implementation, not a verified production tunnel or a complete reconstruction of ngrok. See [the investigation](docs/research/ngrok.md).
 
 ## Build and run
 
-Homebrew development packaging is included in [Formula/pyngrok.rb](Formula/pyngrok.rb).
-See the [Homebrew guide](packaging/homebrew/README.md) for the tap/install commands
-and the pending publication/build checks. It installs the Python CLI and Rust
-engine together; the public tap is not available yet.
+The [standalone release workflow](.github/workflows/release.yml) builds the Rust
+engine and bundles Python and the CLI on GitHub's macOS runners. Only after both
+architectures pass checks does it publish a prerelease and replace the default
+Homebrew formula with a prebuilt package that has **no Homebrew dependencies**.
+The existing default formula remains a source build until that release succeeds.
+See the [Homebrew guide](packaging/homebrew/README.md) for installation and status.
 
 Requires Python 3.11+, uv, and a stable Rust toolchain. From this checkout:
 
