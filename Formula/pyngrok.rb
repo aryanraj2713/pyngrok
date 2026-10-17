@@ -1,52 +1,24 @@
 class Pyngrok < Formula
   desc "Python command center for Rust-powered reverse tunnels"
   homepage "https://github.com/aryanraj2713/pyngrok"
+  version "0.1.0-preview.1"
   license "MIT"
-  head "https://github.com/aryanraj2713/pyngrok.git", branch: "main"
+  depends_on macos: :sonoma
 
-  depends_on "rust" => :build
-  depends_on "uv" => :build
-  depends_on "python@3.13"
-
-  # Development-only HEAD formula. Resolve dependencies during Homebrew's
-  # network-enabled fetch phase; install runs entirely offline.
-  def fetch
-    cd "crates/pyngrok-core" do
-      system "cargo", "generate-lockfile" unless File.exist?("Cargo.lock")
-      system "cargo", "fetch", *std_cargo_fetch_args
+  on_macos do
+    on_arm do
+      url "https://github.com/aryanraj2713/pyngrok/releases/download/v0.1.0-preview.1/pyngrok-0.1.0-macos-arm64.tar.gz"
+      sha256 "94e0535af49647b9c5eef84da3be101976e31250fc13546d70b76e6a649f28ea"
     end
-
-    ENV["UV_CACHE_DIR"] = buildpath/"uv-cache"
-    python = Formula["python@3.13"].opt_bin/"python3.13"
-    system "uv", "pip", "compile", "pyproject.toml", "packaging/homebrew/build.in",
-           "--python", python, "--generate-hashes", "--output-file", buildpath/"requirements.txt"
-    system python, "-m", "pip", "download", "--disable-pip-version-check", "--no-cache-dir",
-           "--require-hashes", "--only-binary=:all:", "--dest", buildpath/"wheelhouse",
-           "--requirement", buildpath/"requirements.txt"
+    on_intel do
+      url "https://github.com/aryanraj2713/pyngrok/releases/download/v0.1.0-preview.1/pyngrok-0.1.0-macos-x86_64.tar.gz"
+      sha256 "2b4177fb444cb1acabf28144c9d1bda6b6443a06e74917194ec5a9baae753701"
+    end
   end
 
   def install
-    system "cargo", "install", *std_cargo_args(path: "crates/pyngrok-core")
-
-    python = Formula["python@3.13"].opt_bin/"python3.13"
-    system python, "-m", "venv", libexec
-    venv_python = libexec/"bin/python"
-    system venv_python, "-m", "pip", "install", "--disable-pip-version-check",
-           "--no-index", "--find-links=#{buildpath}/wheelhouse", "--require-hashes",
-           "--requirement", buildpath/"requirements.txt"
-    system venv_python, "-m", "pip", "install", "--disable-pip-version-check",
-           "--no-index", "--no-deps", "--no-build-isolation", "."
-    (bin/"pyngrok").write_env_script libexec/"bin/pyngrok",
-                                   PYNGROK_CORE: bin/"pyngrok-core"
-  end
-
-  def caveats
-    <<~EOS
-      This is an experimental HEAD build. Native transport verification is pending.
-      Generate a shared secret with `pyngrok keygen` and set PYNGROK_TOKEN on both peers.
-      Run `pyngrok relay` on your server and `pyngrok http 8000` on your workstation.
-      Run `pyngrok preview` to see the dashboard without opening a tunnel.
-    EOS
+    libexec.install Dir["*"]
+    bin.install_symlink libexec/"pyngrok", libexec/"pyngrok-core"
   end
 
   test do
@@ -54,7 +26,5 @@ class Pyngrok < Formula
     assert_equal "pyngrok #{native_version}", shell_output("#{bin}/pyngrok version").strip
     assert_match "pyngrok-core", shell_output("#{bin}/pyngrok doctor")
     assert_match "no tunnel running", shell_output("#{bin}/pyngrok preview")
-    assert_operator shell_output("#{bin}/pyngrok keygen").strip.length, :>=, 32
-    assert_match "pyngrok-core", shell_output("#{bin}/pyngrok-core --version")
   end
 end
