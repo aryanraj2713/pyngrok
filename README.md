@@ -4,7 +4,29 @@ A typed Python CLI with a Rust / Tokio reverse-tunnel engine and a neofetch-insp
 
 **Development status:** Python checks, Rust compilation, eight Rust unit tests, rustfmt and Clippy pass locally. Native network integration is blocked by this sandbox's socket permissions and must pass in CI before a standalone release is published. This is an initial implementation, not a verified production tunnel or a complete reconstruction of ngrok. See [the investigation](docs/research/ngrok.md).
 
-## Build and run
+![Demo terminal dashboard](docs/preview.svg)
+
+## Install on macOS
+
+**Prebuilt installation is pending the first successful standalone release.** The
+current published `--HEAD` formula builds from source and downloads Rust, LLVM,
+uv and Python. That is why the initial installation is large and slow.
+
+The standalone packages include the Python runtime, CLI libraries and native
+engine. Their generated Homebrew formula has **no Homebrew package dependencies**.
+The optimized Rust engine is approximately **2.5 MiB**; the complete package size
+will be recorded by the release build. Startup time remains unmeasured.
+
+After the [standalone release workflow](.github/workflows/release.yml) succeeds
+and updates the formula, install the prebuilt version without `--HEAD`:
+
+```sh
+brew tap aryanraj2713/pyngrok https://github.com/aryanraj2713/pyngrok.git
+brew update
+brew install aryanraj2713/pyngrok/pyngrok
+pyngrok preview
+pyngrok doctor
+```
 
 The [standalone release workflow](.github/workflows/release.yml) builds the Rust
 engine and bundles Python and the CLI on GitHub's macOS runners. Only after both
@@ -13,14 +35,22 @@ Homebrew formula with a prebuilt package that has **no Homebrew dependencies**.
 The existing default formula remains a source build until that release succeeds.
 See the [Homebrew guide](packaging/homebrew/README.md) for installation and status.
 
-Requires Python 3.11+, uv, and a stable Rust toolchain. From this checkout:
+## Build from source
+
+For development, install Python 3.11+, uv, and a stable Rust toolchain. From this checkout:
 
 ```sh
 uv sync
-cargo build --release --manifest-path crates/pyngrok-core/Cargo.toml
+cargo build --release --locked --manifest-path crates/pyngrok-core/Cargo.toml
 uv run pyngrok preview
 uv run pyngrok doctor
 ```
+
+The development Homebrew formula is available separately as
+`brew install --HEAD aryanraj2713/pyngrok/pyngrok-source`. It compiles locally and
+retains the larger build dependencies. Use one Homebrew variant at a time.
+
+## Run a tunnel
 
 Open three terminals with the **same** `PYNGROK_TOKEN` on relay and agent. Generate one with `uv run pyngrok keygen`, then export its output on each machine. Avoid putting secrets in command arguments or shell history.
 
@@ -82,4 +112,9 @@ cargo clippy --manifest-path crates/pyngrok-core/Cargo.toml --all-targets -- -D 
 cargo test --manifest-path crates/pyngrok-core/Cargo.toml
 ```
 
-The integration test is skipped with an explicit reason when the native binary is absent. Python subprocess tests only establish CLI supervision; they do not establish Rust forwarding correctness. CI contains the Rust checks, but has not been run here.
+Locally, 31 Python unit/packaging tests and eight Rust unit tests pass. The three
+native network tests are blocked by sandbox socket permissions and are not
+counted as passed. They run against the actual compiled engine in release CI.
+The integration tests skip with an explicit reason when the native binary is
+absent. Python subprocess tests establish CLI supervision, not Rust forwarding
+correctness. See the [validation record](docs/validation.md) for the full scope.
